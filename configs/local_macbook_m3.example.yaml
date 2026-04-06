@@ -1,0 +1,17 @@
+seed: 42
+
+mixing:
+  clean_manifest: ../manifests/clean_golos.jsonl
+  noise_manifest: ../manifests/noise_mvp.jsonl
+  rir_manifest:
+  sample_rate: 16000
+  num_examples: 2000
+  min_duration_sec: 2.0
+  max_duration_sec: 6.0
+  snr_min_db: -5.0
+  snr_max_db: 20.0
+  focus_snr_min_db: 0.0
+  focus_snr_max_db: 10.0
+  focus_probability: 0.7
+  reverb_probability: 0.3
+  target_peak: 0.95

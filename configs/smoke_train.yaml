@@ -1,0 +1,28 @@
+seed: 11
+
+data:
+  train_manifest: ../manifests/smoke_train.jsonl
+  val_manifest: ../manifests/smoke_val.jsonl
+  sample_rate: 16000
+  segment_seconds: 3.0
+  batch_size: 4
+  num_workers: 0
+  limit_train:
+  limit_val:
+
+model:
+  n_fft: 512
+  hop_length: 128
+  win_length: 512
+  hidden_channels: 16
+
+training:
+  epochs: 4
+  learning_rate: 0.001
+  waveform_loss_weight: 1.0
+  magnitude_loss_weight: 0.5
+  device: cpu
+  output_dir: ../outputs/train_smoke
+  checkpoint_mirror_dir: ../outputs/train_smoke_mirror
+  save_every_epoch: true
+  log_interval: 1

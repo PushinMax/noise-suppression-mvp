@@ -1,0 +1,28 @@
+seed: 42
+
+data:
+  train_manifest: /content/project/manifests/colab_train.jsonl
+  val_manifest: /content/project/manifests/colab_val.jsonl
+  sample_rate: 16000
+  segment_seconds: 3.0
+  batch_size: 8
+  num_workers: 2
+  limit_train: 2000
+  limit_val: 300
+
+model:
+  n_fft: 512
+  hop_length: 128
+  win_length: 512
+  hidden_channels: 24
+
+training:
+  epochs: 6
+  learning_rate: 0.001
+  waveform_loss_weight: 1.0
+  magnitude_loss_weight: 0.5
+  device: auto
+  output_dir: /content/project/outputs/first_colab_run
+  checkpoint_mirror_dir: /content/drive/MyDrive/noise_suppression/first_colab_run
+  save_every_epoch: true
+  log_interval: 20
