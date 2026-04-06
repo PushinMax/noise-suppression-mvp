@@ -28,7 +28,10 @@ metrics = [
   "pystoi>=0.4.1",
 ]
 data = [
-  "datasets>=4.0.0",
+  # FLEURS still uses a Hugging Face dataset loading script; datasets 4.x
+  # rejects those scripts, so keep the Colab data bootstrap on 3.x for now.
+  "datasets>=3.6.0,<4.0.0",
+  "librosa>=0.10.2",
 ]
 train = [
   "torch>=2.6.0",

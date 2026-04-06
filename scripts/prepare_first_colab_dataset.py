@@ -37,14 +37,23 @@ def save_clean_subset(
     max_duration_sec: float,
 ) -> list[Path]:
     clean_dir.mkdir(parents=True, exist_ok=True)
-    dataset = load_dataset(
-        "google/fleurs",
-        "ru_ru",
-        split="train",
-        streaming=True,
-        trust_remote_code=True,
-    )
-    dataset = dataset.cast_column("audio", Audio(sampling_rate=sample_rate))
+    try:
+        dataset = load_dataset(
+            "google/fleurs",
+            "ru_ru",
+            split="train",
+            streaming=True,
+            trust_remote_code=True,
+        )
+        dataset = dataset.cast_column("audio", Audio(sampling_rate=sample_rate))
+    except Exception as exc:
+        raise RuntimeError(
+            "Не удалось загрузить google/fleurs ru_ru. Для этого MVP нужен "
+            "datasets>=3.6.0,<4.0.0: datasets 4.x больше не поддерживает "
+            "старые loading scripts, а FLEURS пока использует fleurs.py. "
+            "В Colab заново выполните установку зависимостей через "
+            "`uv sync --extra train --extra data --extra dev`."
+        ) from exc
 
     saved_paths: list[Path] = []
     for idx, example in enumerate(dataset):

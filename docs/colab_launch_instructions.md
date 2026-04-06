@@ -1,156 +1,148 @@
-# Инструкция по запуску в Google Colab
+# Инструкция по запуску через VSCode Colab extension
 
-## Вариант A. Самый удобный: проект лежит целиком на Google Drive
+## Принцип запуска
 
-Это лучший вариант.
+Теперь notebook **не использует Google Drive**.
 
-### Что сделать локально
+Ожидаемый сценарий:
 
-Просто положите папку проекта целиком на Google Drive, например:
+1. проект ведется в git;
+2. в Colab runtime проект появляется через `git clone`;
+3. notebook запускается из папки проекта;
+4. модель и checkpoint-ы сохраняются локально в `outputs/colab_first_result`.
 
-- `MyDrive/dl/project`
+## Последовательность действий
 
-### Что сделать в notebook
+### 1. Запушьте проект в git
 
-В первой ячейке notebook проверьте путь:
-
-```python
-PROJECT_DIR_ON_DRIVE = Path('/content/drive/MyDrive/dl/project')
-```
-
-Если ваша папка лежит в другом месте, исправьте только эту строку.
-
-### Когда этот вариант подходит лучше всего
-
-- если вы работаете с проектом регулярно
-- если хотите обновлять код без ручной загрузки файлов
-- если хотите, чтобы notebook всегда видел актуальные `src/`, `scripts/`, `configs/`
-
-## Вариант B. Минимальный bundle в один zip
-
-Если не хотите класть весь проект на Drive, можно отправлять в Colab только минимальный набор нужных файлов.
-
-### Шаг 1. Соберите bundle локально
-
-В корне проекта выполните:
+В корне проекта:
 
 ```bash
-python3 scripts/build_colab_bundle.py
+cd /Users/m.pushin/dl/project
+git status --short
+git add .gitignore README.md pyproject.toml uv.lock configs docs notebooks scripts src tests
+git commit -m "Add Colab noise suppression MVP"
+git push
 ```
 
-По умолчанию появится файл:
+### 2. В Colab runtime клонируйте проект
 
-- `dist/colab_bundle.zip`
-
-В нем уже будут нужные файлы:
-
-- `pyproject.toml`
-- `uv.lock`
-- `src/noise_suppression/...`
-- `scripts/prepare_first_colab_dataset.py`
-- `configs/colab_first_result.example.yaml`
-- `notebooks/first_colab_run.ipynb`
-
-### Шаг 2. Загрузите zip на Google Drive
-
-Например сюда:
-
-- `MyDrive/noise_suppression/colab_bundle.zip`
-
-### Шаг 3. Вставьте в первую ячейку Colab этот bootstrap-код
+В первой ячейке notebook укажите URL вашего репозитория:
 
 ```python
-from google.colab import drive
-from pathlib import Path
-import shutil
-import zipfile
-import os
-
-drive.mount('/content/drive')
-
-BUNDLE_ZIP = Path('/content/drive/MyDrive/noise_suppression/colab_bundle.zip')
-RUNTIME_DIR = Path('/content/project')
-
-assert BUNDLE_ZIP.exists(), f'Не найден архив: {BUNDLE_ZIP}'
-
-if RUNTIME_DIR.exists():
-    shutil.rmtree(RUNTIME_DIR)
-RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-
-with zipfile.ZipFile(BUNDLE_ZIP, 'r') as zf:
-    zf.extractall(RUNTIME_DIR)
-
-os.chdir(RUNTIME_DIR)
-print('Готово:', RUNTIME_DIR)
-print('pyproject exists =', Path('pyproject.toml').exists())
-print('cli exists =', Path('src/noise_suppression/cli.py').exists())
-print('prep script exists =', Path('scripts/prepare_first_colab_dataset.py').exists())
+REPO_URL = 'https://github.com/<your-username>/<your-repo>.git'
 ```
 
-После этого уже можно запускать остальные ячейки notebook.
+Если `/content/project` еще нет, notebook сам выполнит `git clone`.
 
-## Что выбрать
+Если репозиторий приватный, используйте персональный токен или настройте доступ в VSCode/Colab extension.
 
-Я рекомендую так:
-
-- если проект живет долго: **Вариант A**
-- если нужен просто перенос минимального набора в Colab: **Вариант B**
-
-## Самая короткая рабочая схема
-
-### Если проект уже на Google Drive
-
-1. Откройте Colab
-2. Смонтируйте Google Drive
-3. Убедитесь, что `PROJECT_DIR_ON_DRIVE` указывает на правильную папку
-4. Запустите первую ячейку notebook
-5. Потом запускайте ячейки сверху вниз
-
-### Если у вас только notebook
-
-1. Выполните локально:
-
-```bash
-python3 scripts/build_colab_bundle.py
-```
-
-2. Загрузите `dist/colab_bundle.zip` на Google Drive
-3. В Colab выполните bootstrap-ячейку из раздела выше
-4. Только потом запускайте notebook
-
-## Что обязательно сохранить на Google Drive во время обучения
-
-В train config должно быть заполнено поле:
-
-- `training.checkpoint_mirror_dir`
-
-Например:
+### 3. Установите зависимости
 
 ```python
-'/content/drive/MyDrive/noise_suppression/first_colab_result'
+run('pip -q install uv')
+run('uv sync --extra train --extra data --extra dev')
+run('uv run noise-suppression env check')
 ```
 
-Тогда после **каждой эпохи** сохраняются:
+Важно: для первого Colab-run мы закрепляем `datasets<4`, потому что `google/fleurs`
+пока загружается через старый `fleurs.py`, а `datasets 4.x` такие loading scripts
+уже не поддерживает. Не удаляйте `uv.lock` перед запуском.
 
-- `epoch_001.pt`, `epoch_002.pt`, ...
-- `last.pt`
-- `best.pt`
-- `history.json`
-- `resolved_config.json`
+### 4. Откройте notebook из проекта
 
-Это нужно на случай:
+Открывайте:
 
-- падения runtime
-- отключения браузера
-- разрыва сессии
-- ручной остановки
+```text
+/content/project/notebooks/first_colab_run.ipynb
+```
 
-## Если хотите запускать без ручного редактирования notebook
+Если VSCode extension открывает локальный notebook, убедитесь, что первая ячейка видит корень проекта:
 
-Самая практичная автоматизация такая:
+```python
+PROJECT_ROOT = Path('/content/project')
+```
 
-1. локально собрать zip-бандл через `scripts/build_colab_bundle.py`
-2. загрузить его на Google Drive
-3. в Colab всегда запускать одну и ту же bootstrap-ячейку распаковки
+В актуальной версии notebook первая ячейка сама ищет корень проекта по `pyproject.toml`.
 
-Тогда не нужно каждый раз вручную переносить `src/`, `scripts/` и `configs/`.
+### 5. Запускайте ячейки сверху вниз
+
+Модель будет сохраняться локально в:
+
+```text
+/content/project/outputs/colab_first_result
+```
+
+После каждой эпохи там должны появляться:
+
+```text
+epoch_001.pt
+epoch_002.pt
+...
+last.pt
+best.pt
+history.json
+resolved_config.json
+```
+
+## Важное ограничение
+
+Локальное сохранение в Colab runtime **не переживает пересоздание runtime**.
+
+Это нормально для текущего сценария, потому что вы попросили сохранять модель локально, а не на Google Drive.
+
+Если нужно забрать модель после запуска, скачайте ее до завершения runtime:
+
+```python
+from google.colab import files
+
+files.download('/content/project/outputs/colab_first_result/best.pt')
+files.download('/content/project/outputs/colab_first_result/history.json')
+```
+
+Или скопируйте весь каталог:
+
+```python
+!zip -r /content/colab_first_result.zip /content/project/outputs/colab_first_result
+from google.colab import files
+files.download('/content/colab_first_result.zip')
+```
+
+## Если notebook говорит, что не найден `pyproject.toml`
+
+Значит runtime не находится в папке проекта.
+
+Исправление:
+
+```python
+%cd /content/project
+!ls
+```
+
+В выводе должны быть:
+
+```text
+pyproject.toml
+src
+configs
+scripts
+notebooks
+```
+
+## Если появляется `Clean manifest пуст`
+
+Это значит, что ячейка подготовки данных не скачала/не создала clean WAV-файлы.
+В актуальной версии notebook выполнение остановится сразу на этой ошибке, а не
+пойдет дальше к `mix plan` и `colab_val.jsonl`.
+
+Что сделать:
+
+```python
+%cd /content/project
+!git pull
+!uv sync --extra train --extra data --extra dev
+```
+
+Затем перезапустите notebook сверху или хотя бы начиная с ячейки установки
+зависимостей. В выводе `uv sync` должно быть видно, что используется
+`datasets==3.6.0`, а не `datasets==4.x`.
