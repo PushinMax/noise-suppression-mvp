@@ -58,6 +58,7 @@ uv run noise-suppression metrics si-sdr \
   "$ROOT_DIR/outputs/train_smoke_val"
 
 echo
-echo "Если нужен перенос в Google Drive из Colab:"
-echo "  укажите training.checkpoint_mirror_dir=/content/drive/MyDrive/noise_suppression/<run_name>"
-echo "Тогда после каждой эпохи туда будут копироваться epoch_XXX.pt, last.pt, best.pt и history.json."
+echo "Checkpoint-ы сохранены локально:"
+echo "  $ROOT_DIR/outputs/train_smoke"
+echo "Mirror-копия для локального smoke test:"
+echo "  $ROOT_DIR/outputs/train_smoke_mirror"

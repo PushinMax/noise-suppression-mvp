@@ -18,6 +18,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-duration-sec", type=float, default=1.5)
     parser.add_argument("--max-duration-sec", type=float, default=12.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--allow-synthetic-fallback",
+        action="store_true",
+        help=(
+            "Если FLEURS временно не загрузился в Colab, создать маленький "
+            "synthetic clean set, чтобы проверить технический пайплайн."
+        ),
+    )
     return parser
 
 
@@ -77,6 +85,9 @@ def save_clean_subset(
         txt_path.write_text(transcription, encoding="utf-8")
         saved_paths.append(wav_path)
 
+        if len(saved_paths) % 10 == 0:
+            print(f"FLEURS clean files prepared: {len(saved_paths)}/{num_clean}", flush=True)
+
         if len(saved_paths) >= num_clean:
             break
 
@@ -85,6 +96,47 @@ def save_clean_subset(
             "Удалось подготовить только "
             f"{len(saved_paths)} clean examples из запрошенных {num_clean}."
         )
+
+    return saved_paths
+
+
+def create_synthetic_clean_subset(
+    clean_dir: Path,
+    num_clean: int,
+    sample_rate: int,
+    min_duration_sec: float,
+    max_duration_sec: float,
+    seed: int,
+) -> list[Path]:
+    """Create speech-like diagnostic tones only as a fallback for Colab bootstrap."""
+    clean_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    duration_sec = min(max(3.0, min_duration_sec), max_duration_sec)
+    num_samples = int(duration_sec * sample_rate)
+    time = np.arange(num_samples, dtype=np.float32) / sample_rate
+    saved_paths: list[Path] = []
+
+    for idx in range(num_clean):
+        base = float(rng.uniform(130.0, 230.0))
+        formants = (
+            0.60 * np.sin(2 * np.pi * base * time)
+            + 0.25 * np.sin(2 * np.pi * (2.1 * base) * time + rng.uniform(0, np.pi))
+            + 0.15 * np.sin(2 * np.pi * (3.4 * base) * time + rng.uniform(0, np.pi))
+        )
+        syllable_rate = float(rng.uniform(3.0, 5.5))
+        envelope = 0.5 + 0.5 * np.sin(2 * np.pi * syllable_rate * time + rng.uniform(0, np.pi))
+        envelope = np.clip(envelope, 0.05, 1.0)
+        breath = 0.01 * rng.standard_normal(num_samples).astype(np.float32)
+        audio = normalize((formants * envelope + breath).astype(np.float32))
+
+        speaker_dir = clean_dir / f"synthetic_speaker_{idx % 4:02d}"
+        speaker_dir.mkdir(parents=True, exist_ok=True)
+        stem = f"synthetic_ru_like_{idx:04d}"
+        wav_path = speaker_dir / f"{stem}.wav"
+        txt_path = speaker_dir / f"{stem}.txt"
+        sf.write(wav_path, audio, sample_rate)
+        txt_path.write_text("synthetic fallback audio for pipeline check", encoding="utf-8")
+        saved_paths.append(wav_path)
 
     return saved_paths
 
@@ -158,13 +210,31 @@ def main() -> None:
     clean_dir = output_root / "clean"
     noise_dir = output_root / "noise"
 
-    clean_paths = save_clean_subset(
-        clean_dir=clean_dir,
-        num_clean=args.num_clean,
-        sample_rate=args.sample_rate,
-        min_duration_sec=args.min_duration_sec,
-        max_duration_sec=args.max_duration_sec,
-    )
+    try:
+        clean_paths = save_clean_subset(
+            clean_dir=clean_dir,
+            num_clean=args.num_clean,
+            sample_rate=args.sample_rate,
+            min_duration_sec=args.min_duration_sec,
+            max_duration_sec=args.max_duration_sec,
+        )
+    except Exception as exc:
+        if not args.allow_synthetic_fallback:
+            raise
+        print(
+            "WARNING: FLEURS не подготовился, включаю synthetic fallback только "
+            "для проверки пайплайна. Для финальных метрик этот fallback не подходит.",
+            flush=True,
+        )
+        print(f"Original error: {type(exc).__name__}: {exc}", flush=True)
+        clean_paths = create_synthetic_clean_subset(
+            clean_dir=clean_dir,
+            num_clean=args.num_clean,
+            sample_rate=args.sample_rate,
+            min_duration_sec=args.min_duration_sec,
+            max_duration_sec=args.max_duration_sec,
+            seed=args.seed,
+        )
     noise_paths = create_noise_pool(
         noise_dir=noise_dir,
         clean_paths=clean_paths,

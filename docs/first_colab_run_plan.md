@@ -80,18 +80,17 @@
 
 ## Обязательное сохранение модели
 
-Для Colab рекомендуемая схема:
+Для текущего сценария через VSCode Colab extension используем локальное сохранение:
 
 - локальный output:
-  - `/content/project/outputs/first_colab_run`
-- mirror checkpoint directory:
-  - `/content/drive/MyDrive/noise_suppression/first_colab_run`
+  - `/content/project/outputs/colab_first_result`
 
-В нашем конфиге это поле:
+В нашем конфиге:
 
-- `training.checkpoint_mirror_dir`
+- `training.output_dir` указывает на локальную папку с checkpoint-ами
+- `training.checkpoint_mirror_dir` выключен и равен `None`
 
-Если оно задано, после **каждой эпохи** туда копируются:
+После **каждой эпохи** локально сохраняются:
 
 - `epoch_XXX.pt`
 - `last.pt`
@@ -99,12 +98,8 @@
 - `history.json`
 - `resolved_config.json`
 
-Это сделано специально на случай:
+Важно: локальные файлы Colab runtime не переживают пересоздание runtime. Если модель нужно забрать после запуска, скачайте `best.pt` или zip-архив с `outputs/colab_first_result` до остановки runtime.
 
-- restart runtime
-- disconnect
-- manual interruption
-- out-of-memory или любой другой аварии
 
 ## Какой конфиг брать за основу
 
@@ -117,7 +112,7 @@
 - маленький `limit_train`
 - маленький `limit_val`
 - `save_every_epoch: true`
-- `checkpoint_mirror_dir` указывает на Google Drive
+- `checkpoint_mirror_dir` выключен для локального сохранения
 
 ## Следующий шаг после первого удачного Colab-run
 
