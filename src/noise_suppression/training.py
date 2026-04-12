@@ -10,12 +10,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from .audio import read_audio_mono, write_audio
 from .manifests import load_manifest
 from .metrics import si_sdr
-from .modeling import TinyMaskNet
+from .modeling import FullSubNetLite, TinyMaskNet
 
 warnings.filterwarnings(
     "ignore",
@@ -38,10 +39,16 @@ class DataConfig:
 
 @dataclass
 class ModelConfig:
+    architecture: str
     n_fft: int
     hop_length: int
     win_length: int
     hidden_channels: int
+    full_hidden_size: int
+    sub_hidden_size: int
+    subband_context: int
+    full_num_layers: int
+    sub_num_layers: int
 
 
 @dataclass
@@ -126,10 +133,16 @@ def resolve_experiment_config(path: Path) -> ExperimentConfig:
             limit_val=None if data.get("limit_val") is None else int(data["limit_val"]),
         ),
         model=ModelConfig(
+            architecture=str(model.get("architecture", "tiny_mask")),
             n_fft=int(model["n_fft"]),
             hop_length=int(model["hop_length"]),
             win_length=int(model["win_length"]),
-            hidden_channels=int(model["hidden_channels"]),
+            hidden_channels=int(model.get("hidden_channels", 24)),
+            full_hidden_size=int(model.get("full_hidden_size", 48)),
+            sub_hidden_size=int(model.get("sub_hidden_size", 24)),
+            subband_context=int(model.get("subband_context", 2)),
+            full_num_layers=int(model.get("full_num_layers", 1)),
+            sub_num_layers=int(model.get("sub_num_layers", 1)),
         ),
         training=TrainConfig(
             epochs=int(training["epochs"]),
@@ -200,16 +213,75 @@ def create_dataloaders(config: ExperimentConfig) -> tuple[DataLoader, DataLoader
     return train_loader, val_loader
 
 
-def build_model(config: ExperimentConfig) -> TinyMaskNet:
-    return TinyMaskNet(
-        n_fft=config.model.n_fft,
-        hop_length=config.model.hop_length,
-        win_length=config.model.win_length,
-        hidden_channels=config.model.hidden_channels,
+def build_model_from_model_config(model_config: ModelConfig) -> nn.Module:
+    architecture = model_config.architecture.lower()
+    if architecture in {"tiny", "tiny_mask", "tiny_mask_net"}:
+        return TinyMaskNet(
+            n_fft=model_config.n_fft,
+            hop_length=model_config.hop_length,
+            win_length=model_config.win_length,
+            hidden_channels=model_config.hidden_channels,
+        )
+    if architecture in {"fullsubnet_lite", "fullsubnet-like", "fullsubnet_like"}:
+        return FullSubNetLite(
+            n_fft=model_config.n_fft,
+            hop_length=model_config.hop_length,
+            win_length=model_config.win_length,
+            full_hidden_size=model_config.full_hidden_size,
+            sub_hidden_size=model_config.sub_hidden_size,
+            subband_context=model_config.subband_context,
+            full_num_layers=model_config.full_num_layers,
+            sub_num_layers=model_config.sub_num_layers,
+        )
+    raise ValueError(f"Неизвестная architecture: {model_config.architecture}")
+
+
+def build_model(config: ExperimentConfig) -> nn.Module:
+    return build_model_from_model_config(config.model)
+
+
+def model_config_from_checkpoint_payload(payload: dict) -> ModelConfig:
+    return ModelConfig(
+        architecture=str(payload.get("architecture", "tiny_mask")),
+        n_fft=int(payload["n_fft"]),
+        hop_length=int(payload["hop_length"]),
+        win_length=int(payload["win_length"]),
+        hidden_channels=int(payload.get("hidden_channels", 24)),
+        full_hidden_size=int(payload.get("full_hidden_size", 48)),
+        sub_hidden_size=int(payload.get("sub_hidden_size", 24)),
+        subband_context=int(payload.get("subband_context", 2)),
+        full_num_layers=int(payload.get("full_num_layers", 1)),
+        sub_num_layers=int(payload.get("sub_num_layers", 1)),
     )
 
 
-def magnitude_l1(model: TinyMaskNet, estimate: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def checkpoint_model_config(model: nn.Module) -> dict:
+    if isinstance(model, FullSubNetLite):
+        return {
+            "architecture": "fullsubnet_lite",
+            "n_fft": model.n_fft,
+            "hop_length": model.hop_length,
+            "win_length": model.win_length,
+            "full_hidden_size": model.full_hidden_size,
+            "sub_hidden_size": model.sub_hidden_size,
+            "subband_context": model.subband_context,
+            "full_num_layers": model.full_num_layers,
+            "sub_num_layers": model.sub_num_layers,
+        }
+    if isinstance(model, TinyMaskNet):
+        return {
+            "architecture": "tiny_mask",
+            "n_fft": model.n_fft,
+            "hop_length": model.hop_length,
+            "win_length": model.win_length,
+            "hidden_channels": model.hidden_channels,
+        }
+    raise TypeError(
+        f"Нельзя сохранить checkpoint для неизвестной модели: {model.__class__.__name__}"
+    )
+
+
+def magnitude_l1(model: nn.Module, estimate: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     estimate_mag = model.stft(estimate).abs()
     target_mag = model.stft(target).abs()
     return torch.mean(torch.abs(torch.log1p(estimate_mag) - torch.log1p(target_mag)))
@@ -225,7 +297,7 @@ def batch_si_sdr(estimate: torch.Tensor, target: torch.Tensor) -> float:
 
 
 def compute_loss(
-    model: TinyMaskNet,
+    model: nn.Module,
     estimate: torch.Tensor,
     target: torch.Tensor,
     config: ExperimentConfig,
@@ -267,7 +339,7 @@ def mirror_file(source: Path, mirror_dir: Path | None) -> None:
 
 
 def save_checkpoint(
-    model: TinyMaskNet,
+    model: nn.Module,
     optimizer: torch.optim.Optimizer,
     epoch: int,
     metrics: dict,
@@ -281,12 +353,7 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "metrics": metrics,
-        "model_config": {
-            "n_fft": model.n_fft,
-            "hop_length": model.hop_length,
-            "win_length": model.win_length,
-            "hidden_channels": model.hidden_channels,
-        },
+        "model_config": checkpoint_model_config(model),
     }
     epoch_path = output_dir / f"epoch_{epoch:03d}.pt"
     torch.save(checkpoint, epoch_path)
@@ -381,16 +448,11 @@ def train_from_config(config_path: Path) -> dict:
 def load_model_from_checkpoint(
     checkpoint_path: Path,
     device: str = "auto",
-) -> tuple[TinyMaskNet, torch.device]:
+) -> tuple[nn.Module, torch.device]:
     torch_device = choose_device(device)
     checkpoint = torch.load(checkpoint_path, map_location=torch_device)
-    model_config = checkpoint["model_config"]
-    model = TinyMaskNet(
-        n_fft=int(model_config["n_fft"]),
-        hop_length=int(model_config["hop_length"]),
-        win_length=int(model_config["win_length"]),
-        hidden_channels=int(model_config["hidden_channels"]),
-    )
+    model_config = model_config_from_checkpoint_payload(checkpoint["model_config"])
+    model = build_model_from_model_config(model_config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(torch_device)
     model.eval()

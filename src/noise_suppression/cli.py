@@ -21,7 +21,7 @@ from .manifests import (
     summarize_manifest,
     write_jsonl,
 )
-from .metrics import score_si_sdr_manifest, score_wer
+from .metrics import score_enhancement_manifest, score_si_sdr_manifest, score_wer
 from .plans import generate_mix_plan, load_mix_recipe, render_mix_plan
 
 app = typer.Typer(help="Инструменты для MVP по шумоподавлению русской речи.")
@@ -181,6 +181,27 @@ def metrics_si_sdr(
 ) -> None:
     summary = score_si_sdr_manifest(rendered_manifest_path, estimate_dir)
     table = Table(title="SI-SDR Summary")
+    table.add_column("Поле")
+    table.add_column("Значение")
+    for key, value in summary.items():
+        table.add_row(key, f"{value:.6f}" if isinstance(value, float) else str(value))
+    console.print(table)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@metrics_app.command("enhancement")
+def metrics_enhancement(
+    rendered_manifest_path: Path,
+    estimate_dir: Path,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(help="Необязательный JSON output."),
+    ] = None,
+) -> None:
+    summary = score_enhancement_manifest(rendered_manifest_path, estimate_dir)
+    table = Table(title="Enhancement Metrics")
     table.add_column("Поле")
     table.add_column("Значение")
     for key, value in summary.items():

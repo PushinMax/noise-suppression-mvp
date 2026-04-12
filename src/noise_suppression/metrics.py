@@ -34,6 +34,24 @@ def si_sdr(reference: np.ndarray, estimate: np.ndarray) -> float:
     return float(10.0 * np.log10(np.sum(projection**2) / noise_energy))
 
 
+def waveform_snr(reference: np.ndarray, estimate: np.ndarray) -> float:
+    reference = reference.astype(np.float64, copy=False)
+    estimate = estimate.astype(np.float64, copy=False)
+    min_length = min(reference.shape[0], estimate.shape[0])
+    if min_length == 0:
+        raise ValueError("Пустой сигнал нельзя использовать для SNR.")
+    reference = reference[:min_length]
+    estimate = estimate[:min_length]
+    error = estimate - reference
+    reference_energy = np.sum(reference**2)
+    error_energy = np.sum(error**2)
+    if reference_energy <= 1e-12:
+        raise ValueError("Reference signal имеет почти нулевую энергию.")
+    if error_energy <= 1e-12:
+        return 100.0
+    return float(10.0 * np.log10(reference_energy / error_energy))
+
+
 def score_si_sdr_manifest(rendered_manifest_path: Path, estimate_dir: Path) -> dict:
     rows = load_manifest(rendered_manifest_path)
     values: list[float] = []
@@ -55,6 +73,32 @@ def score_si_sdr_manifest(rendered_manifest_path: Path, estimate_dir: Path) -> d
         "missing": missing,
         "si_sdr_mean": mean_value,
         "si_sdr_median": median_value,
+    }
+
+
+def score_enhancement_manifest(rendered_manifest_path: Path, estimate_dir: Path) -> dict:
+    rows = load_manifest(rendered_manifest_path)
+    si_sdr_values: list[float] = []
+    snr_values: list[float] = []
+    missing = 0
+
+    for row in rows:
+        estimate_path = estimate_dir / f"{row['id']}.wav"
+        if not estimate_path.exists():
+            missing += 1
+            continue
+        reference, sample_rate = read_audio_mono(row["clean_path"])
+        estimate, _ = read_audio_mono(estimate_path, target_sample_rate=sample_rate)
+        si_sdr_values.append(si_sdr(reference, estimate))
+        snr_values.append(waveform_snr(reference, estimate))
+
+    return {
+        "count": len(si_sdr_values),
+        "missing": missing,
+        "si_sdr_mean": float(np.mean(si_sdr_values)) if si_sdr_values else float("nan"),
+        "si_sdr_median": float(np.median(si_sdr_values)) if si_sdr_values else float("nan"),
+        "snr_mean": float(np.mean(snr_values)) if snr_values else float("nan"),
+        "snr_median": float(np.median(snr_values)) if snr_values else float("nan"),
     }
 
 
