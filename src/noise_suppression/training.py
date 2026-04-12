@@ -92,25 +92,37 @@ class PairedWaveDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __len__(self) -> int:
         return len(self.rows)
 
-    def _crop_or_pad(self, audio: np.ndarray) -> np.ndarray:
-        if audio.shape[0] >= self.segment_samples:
+    def _crop_or_pad_pair(
+        self,
+        noisy: np.ndarray,
+        clean: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        min_length = min(noisy.shape[0], clean.shape[0])
+        if min_length >= self.segment_samples:
             if self.random_crop:
-                max_start = audio.shape[0] - self.segment_samples
+                max_start = min_length - self.segment_samples
                 start = random.randint(0, max_start) if max_start > 0 else 0
             else:
-                start = max(0, (audio.shape[0] - self.segment_samples) // 2)
-            return audio[start : start + self.segment_samples].astype(np.float32, copy=False)
+                start = max(0, (min_length - self.segment_samples) // 2)
+            end = start + self.segment_samples
+            return (
+                noisy[start:end].astype(np.float32, copy=False),
+                clean[start:end].astype(np.float32, copy=False),
+            )
 
-        padded = np.zeros(self.segment_samples, dtype=np.float32)
-        padded[: audio.shape[0]] = audio
-        return padded
+        noisy_padded = np.zeros(self.segment_samples, dtype=np.float32)
+        clean_padded = np.zeros(self.segment_samples, dtype=np.float32)
+        noisy_length = min(noisy.shape[0], self.segment_samples)
+        clean_length = min(clean.shape[0], self.segment_samples)
+        noisy_padded[:noisy_length] = noisy[:noisy_length]
+        clean_padded[:clean_length] = clean[:clean_length]
+        return noisy_padded, clean_padded
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         row = self.rows[index]
         noisy, _ = read_audio_mono(row["noisy_path"], target_sample_rate=self.sample_rate)
         clean, _ = read_audio_mono(row["clean_path"], target_sample_rate=self.sample_rate)
-        noisy = self._crop_or_pad(noisy)
-        clean = self._crop_or_pad(clean)
+        noisy, clean = self._crop_or_pad_pair(noisy, clean)
         return torch.from_numpy(noisy), torch.from_numpy(clean)
 
 
