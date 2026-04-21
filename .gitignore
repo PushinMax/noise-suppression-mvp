@@ -6,6 +6,7 @@ __pycache__/
 data/
 outputs/
 manifests/
+artifacts/
 
 *.pyc
 *.pyo
